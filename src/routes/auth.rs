@@ -1,10 +1,23 @@
 use crate::AppState;
 use crate::auth::jwt::TokenType;
 use crate::error::{AppError, Result};
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Redirect, Response},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_cookies::{Cookie, Cookies};
+
+/// Applies the configured cookie Domain (if any) so the session is shared across
+/// subdomains instead of scoped to bouncarr's own host. See SecurityConfig::cookie_domain.
+fn apply_cookie_domain(cookie: &mut Cookie<'static>, state: &AppState) {
+    if let Some(domain) = &state.config.security.cookie_domain {
+        cookie.set_domain(domain.clone());
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
@@ -63,6 +76,7 @@ pub async fn login(
     access_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
         state.jwt_manager.access_token_expiry_seconds(),
     ));
+    apply_cookie_domain(&mut access_cookie, &state);
     cookies.add(access_cookie);
 
     let mut refresh_cookie = Cookie::new(
@@ -77,6 +91,7 @@ pub async fn login(
     refresh_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
         refresh_max_age,
     ));
+    apply_cookie_domain(&mut refresh_cookie, &state);
     cookies.add(refresh_cookie);
 
     Ok(Json(LoginResponse {
@@ -123,6 +138,7 @@ pub async fn refresh(
     access_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
         state.jwt_manager.access_token_expiry_seconds(),
     ));
+    apply_cookie_domain(&mut access_cookie, &state);
     cookies.add(access_cookie);
 
     Ok(Json(LoginResponse {
@@ -130,6 +146,53 @@ pub async fn refresh(
         username: user_info.username,
         is_admin: user_info.is_administrator,
     }))
+}
+
+/// Forward-auth endpoint for a reverse proxy fronting a *different* domain (e.g.
+/// Caddy's `forward_auth` on sonarr.mfmseth.com, proxying straight to Sonarr itself
+/// rather than through bouncarr). Only checks the session cookie -- returns 200 if
+/// it's a valid admin access token, otherwise an absolute redirect to bouncarr's own
+/// login page (relative redirects would resolve against the *caller's* domain, which
+/// is wrong here) carrying the original URL from Caddy's X-Forwarded-* headers so the
+/// login page can send the browser back where it started.
+///
+/// Requires `security.cookie_domain` to be set -- otherwise the browser never sends
+/// bouncarr's cookie to a different domain in the first place.
+pub async fn verify(State(state): State<Arc<AppState>>, cookies: Cookies, headers: HeaderMap) -> Response {
+    let authorized = cookies
+        .get(&state.config.security.cookie_name)
+        .and_then(|cookie| {
+            state
+                .jwt_manager
+                .validate_token(cookie.value(), TokenType::Access)
+                .ok()
+        })
+        .map(|claims| claims.is_admin)
+        .unwrap_or(false);
+
+    if authorized {
+        return StatusCode::OK.into_response();
+    }
+
+    let header_str = |name: &str| -> Option<&str> { headers.get(name).and_then(|v| v.to_str().ok()) };
+    let proto = header_str("x-forwarded-proto").unwrap_or("https");
+    let host = header_str("x-forwarded-host").unwrap_or("");
+    let uri = header_str("x-forwarded-uri").unwrap_or("/");
+    let original_url = format!("{proto}://{host}{uri}");
+
+    let login_base = state
+        .config
+        .security
+        .cookie_domain
+        .as_deref()
+        .map(|domain| format!("https://bouncarr{domain}"))
+        .unwrap_or_default();
+
+    Redirect::to(&format!(
+        "{login_base}/bouncarr/login?redirect={}",
+        urlencoding::encode(&original_url)
+    ))
+    .into_response()
 }
 
 pub async fn logout(

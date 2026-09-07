@@ -179,7 +179,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/bouncarr/login", get(routes::serve_login_page))
         .route("/bouncarr/api/auth/login", post(routes::login))
         .route("/bouncarr/api/auth/refresh", post(routes::refresh))
-        .route("/bouncarr/api/auth/logout", post(routes::logout));
+        .route("/bouncarr/api/auth/logout", post(routes::logout))
+        .route("/bouncarr/api/auth/verify", get(routes::verify));
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()

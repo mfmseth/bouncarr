@@ -60,6 +60,14 @@ pub struct SecurityConfig {
     /// WARNING: Random keys invalidate all tokens on server restart!
     #[serde(default)]
     pub jwt_secret: Option<String>,
+    /// Cookie Domain attribute (e.g. ".example.com"). If set, session cookies are
+    /// shared across all subdomains instead of scoped to bouncarr's own host --
+    /// required for the /api/auth/verify forward-auth endpoint to work when other
+    /// domains reverse-proxy to their own backend and only ask bouncarr "is this
+    /// request authorized?". Also used to build the absolute login-redirect URL
+    /// that endpoint returns, as "https://bouncarr{cookie_domain}".
+    #[serde(default)]
+    pub cookie_domain: Option<String>,
 }
 
 impl Config {

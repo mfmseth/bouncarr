@@ -163,6 +163,7 @@ mod tests {
             refresh_cookie_name: "test_refresh".to_string(),
             secure_cookies: false,
             jwt_secret: Some("test-secret-key-for-testing".to_string()),
+            cookie_domain: None,
         }
     }
 
