@@ -9,8 +9,10 @@ use crate::auth::JwtManager;
 use crate::config::Config;
 use crate::jellyfin::JellyfinClient;
 use axum::{
-    Router, middleware,
-    response::Redirect,
+    Router,
+    extract::State,
+    middleware,
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{any, get, post},
 };
 use std::sync::Arc;
@@ -119,6 +121,57 @@ async fn shutdown_signal() {
     }
 }
 
+/// Landing page for authenticated users. Redirects straight through if only one
+/// *arr app is configured; otherwise lists them. Only reachable once auth_middleware
+/// has already confirmed the request is an authenticated admin.
+async fn landing_page(State(state): State<Arc<AppState>>) -> Response {
+    if state.config.arr_apps.len() == 1 {
+        return Redirect::to(&format!("/{}/", state.config.arr_apps[0].name)).into_response();
+    }
+
+    let links: String = state
+        .config
+        .arr_apps
+        .iter()
+        .map(|app| {
+            format!(
+                r#"<li><a href="/{name}/">{name}</a></li>"#,
+                name = app.name
+            )
+        })
+        .collect();
+
+    Html(format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bouncarr</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh; display: flex; justify-content: center; align-items: center; }}
+        .card {{ background: white; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                 padding: 40px; min-width: 300px; }}
+        h1 {{ margin-bottom: 20px; color: #333; }}
+        ul {{ list-style: none; }}
+        li {{ margin-bottom: 10px; }}
+        a {{ display: block; padding: 12px; border-radius: 6px; text-decoration: none;
+             color: #333; background: #f5f5f7; font-weight: 500; }}
+        a:hover {{ background: #ece9f5; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Bouncarr</h1>
+        <ul>{links}</ul>
+    </div>
+</body>
+</html>"#
+    ))
+    .into_response()
+}
+
 fn build_router(state: Arc<AppState>) -> Router {
     // Public routes (no authentication required)
     let public_routes = Router::new()
@@ -133,10 +186,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/:app/*path", any(proxy::proxy_handler))
         .route("/:app/", any(proxy::proxy_handler))
         .route("/:app", any(proxy::proxy_handler))
-        .route(
-            "/",
-            get(|| async { Redirect::permanent("/bouncarr/login") }),
-        )
+        .route("/", get(landing_page))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
