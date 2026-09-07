@@ -127,7 +127,16 @@ async fn forward_request(
 fn should_skip_header(name: &str) -> bool {
     matches!(
         name,
-        "host" | "connection" | "transfer-encoding" | "content-length"
+        "host"
+            | "connection"
+            | "transfer-encoding"
+            | "content-length"
+            // Upstream *arr apps are plain-HTTP-only. Forwarding the client's original
+            // X-Forwarded-Proto/Host makes ASP.NET Core build self-referential https://
+            // redirect Location headers back to an http-only port/host, which the proxy
+            // then fails to follow (TLS handshake against a plain HTTP listener).
+            | "x-forwarded-proto"
+            | "x-forwarded-host"
     )
 }
 
