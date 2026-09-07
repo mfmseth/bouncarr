@@ -59,20 +59,9 @@ pub async fn login(
     access_cookie.set_secure(state.config.security.secure_cookies);
     access_cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
     access_cookie.set_path("/");
-    // Set max age to end of day to match JWT expiration
-    let now = chrono::Utc::now();
-    let end_of_day = now
-        .date_naive()
-        .and_hms_opt(23, 59, 59)
-        .ok_or_else(|| {
-            crate::error::AppError::Internal(anyhow::anyhow!(
-                "Failed to create end of day timestamp"
-            ))
-        })?
-        .and_utc();
-    let seconds_until_eod = (end_of_day - now).num_seconds();
+    // Max-Age matches the access token's own exp (config: access_token_expiry_hours)
     access_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
-        seconds_until_eod,
+        state.jwt_manager.access_token_expiry_seconds(),
     ));
     cookies.add(access_cookie);
 
@@ -130,20 +119,9 @@ pub async fn refresh(
     access_cookie.set_secure(state.config.security.secure_cookies);
     access_cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
     access_cookie.set_path("/");
-    // Set max age to end of day to match JWT expiration
-    let now = chrono::Utc::now();
-    let end_of_day = now
-        .date_naive()
-        .and_hms_opt(23, 59, 59)
-        .ok_or_else(|| {
-            crate::error::AppError::Internal(anyhow::anyhow!(
-                "Failed to create end of day timestamp"
-            ))
-        })?
-        .and_utc();
-    let seconds_until_eod = (end_of_day - now).num_seconds();
+    // Max-Age matches the access token's own exp (config: access_token_expiry_hours)
     access_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
-        seconds_until_eod,
+        state.jwt_manager.access_token_expiry_seconds(),
     ));
     cookies.add(access_cookie);
 

@@ -36,6 +36,7 @@ pub enum TokenType {
 pub struct JwtManager {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
+    access_token_expiry: Duration,
     refresh_token_expiry: Duration,
 }
 
@@ -69,8 +70,14 @@ impl JwtManager {
         Self {
             encoding_key: EncodingKey::from_secret(secret.as_bytes()),
             decoding_key: DecodingKey::from_secret(secret.as_bytes()),
+            access_token_expiry: Duration::hours(config.access_token_expiry_hours as i64),
             refresh_token_expiry: Duration::days(config.refresh_token_expiry_days as i64),
         }
+    }
+
+    /// Seconds until the access token expires, for setting a matching cookie Max-Age.
+    pub fn access_token_expiry_seconds(&self) -> i64 {
+        self.access_token_expiry.num_seconds()
     }
 
     fn generate_secret() -> String {
@@ -87,23 +94,16 @@ impl JwtManager {
 
     /// Create an access token for a user
     ///
-    /// Access tokens expire at the end of the current day.
+    /// Access tokens expire `access_token_expiry_hours` (config) after issuance.
     pub fn create_access_token(&self, user_info: &UserInfo) -> Result<String> {
         let now = Utc::now();
-        // Access token expires at end of day
-        let end_of_day = now
-            .date_naive()
-            .and_hms_opt(23, 59, 59)
-            .ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!("Failed to create end of day timestamp"))
-            })?
-            .and_utc();
+        let expiry = now + self.access_token_expiry;
 
         let claims = Claims {
             sub: user_info.user_id.clone(),
             username: user_info.username.clone(),
             is_admin: user_info.is_administrator,
-            exp: end_of_day.timestamp(),
+            exp: expiry.timestamp(),
             iat: now.timestamp(),
             token_type: TokenType::Access,
         };
